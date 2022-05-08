@@ -240,16 +240,20 @@ def get_season_cascaded(full_path):
     # 逐级向上解析目录季数
     full_path = os.path.abspath(full_path).replace('\\', '/').replace('//', '/')
     parent_folder_names = full_path.split('/')[::-1]
+    tv_name = None
     season = None
-    for parent_folder_name in parent_folder_names:
+    for index, parent_folder_name in enumerate(parent_folder_names):
         season = get_season(parent_folder_name)
         if season:
+            # 找到季数，找上一级的目录名为当前剧名
+            tv_name = parent_folder_names[index+1]
             break
-    return season
+    return tv_name, season
 
 
 def get_season_and_ep(file_path):
     logger.info(f"{'解析文件', file_path}")
+    tv_name = None
     season = None
     ep = None
 
@@ -264,58 +268,58 @@ def get_season_and_ep(file_path):
     _ = get_season_cascaded(parent_folder_path)
     if not _:
         # logger.info(f"{'不在season文件夹内 忽略'}")
-        return None, None
+        return tv_name, season, ep
 
     # 忽略已按规则命名的文件
-    pat = 'S\d{1,4}E\d{1,4}(\.5)?'
+    pat = '.+ - S\d{1,4}E\d{1,4}(\.5)?'
     if re.match(pat, file_name):
         logger.info(f"{'忽略'}")
-        return None, None
+        return tv_name, season, ep
 
     # 如果文件已经有 S01EP01 或者 S01E01 直接读取
-    pat = '[Ss](\d{1,4})[Ee](\d{1,4}(\.5)?)'
+    pat = '(.+)? - [Ss](\d{1,4})[Ee](\d{1,4}(\.5)?)'
     res = re.findall(pat, file_name.upper())
     if res:
-        season, ep = res[0][0], res[0][1]
+        tv_name, season, ep = res[0][0], res[0][1], res[0][2]
         season = str(int(season)).zfill(2)
         ep = str(int(ep)).zfill(2)
-        return season, ep
-    pat = '[Ss](\d{1,4})[Ee][Pp](\d{1,4}(\.5)?)'
+        return tv_name, season, ep
+    pat = '(.+)? - [Ss](\d{1,4})[Ee][Pp](\d{1,4}(\.5)?)'
     res = re.findall(pat, file_name.upper())
     if res:
-        season, ep = res[0][0], res[0][1]
+        tv_name, season, ep = res[0][0], res[0][1], res[0][2]
         season = str(int(season)).zfill(2)
         ep = str(int(ep)).zfill(2)
-        return season, ep
+        return tv_name, season, ep
 
-    season = get_season_cascaded(parent_folder_path)
+    tv_name, season = get_season_cascaded(parent_folder_path)
 
     # 获取不到季数 退出
     if not season:
-        return None, None
+        return tv_name, season, ep
 
     # 根据文件名获取集数
 
     # 特殊文件名使用配置的匹配规则
     # 确定是否满足特殊规则
-    use_custom_rule = False
-    for starts_str, rules in starts_with_rules:
-        if file_name.startswith(starts_str):
-            use_custom_rule = True
-            for rule in rules:
-                try:
-                    res = re.findall(rule, file_name)
-                    if res:
-                        logger.info(f"{'根据特殊规则找到了集数'}")
-                        ep = res[0]
-                        season = str(int(season)).zfill(2)
-                        ep = str(int(ep)).zfill(2)
-                        return season, ep
-                except Exception as e:
-                    logger.info(f'{e}')
-    # 如果满足特殊规则还没找到ep 直接返回空
-    if use_custom_rule and not ep:
-        return None, None
+    # use_custom_rule = False
+    # for starts_str, rules in starts_with_rules:
+    #     if file_name.startswith(starts_str):
+    #         use_custom_rule = True
+    #         for rule in rules:
+    #             try:
+    #                 res = re.findall(rule, file_name)
+    #                 if res:
+    #                     logger.info(f"{'根据特殊规则找到了集数'}")
+    #                     ep = res[0]
+    #                     season = str(int(season)).zfill(2)
+    #                     ep = str(int(ep)).zfill(2)
+    #                     return season, ep
+    #             except Exception as e:
+    #                 logger.info(f'{e}')
+    # # 如果满足特殊规则还没找到ep 直接返回空
+    # if use_custom_rule and not ep:
+    #     return None, None
 
     # 其它不在特殊规则的继续往下正常查找匹配
 
@@ -462,7 +466,7 @@ def get_season_and_ep(file_path):
     season = zero_fix(season)
     ep = zero_fix(ep)
 
-    return season, ep
+    return tv_name, season, ep
 
 
 def get_season_path(file_path):
@@ -597,13 +601,13 @@ if os.path.isdir(target_path):
             file_path = os.path.join(root, name).replace('\\', '/')
             file_path = os.path.abspath(file_path)
             parent_folder_path = os.path.dirname(file_path)
-            season, ep = get_season_and_ep(file_path)
-            logger.info(f'{season, ep}')
+            tv_name, season, ep = get_season_and_ep(file_path)
+            logger.info(f'{tv_name, season, ep}')
             # 重命名
             if season and ep:
                 # 修正集数
                 ep = ep_offset_patch(file_path, ep)
-                new_name = 'S' + season + 'E' + ep + '.' + fix_ext(ext)
+                new_name = tv_name + ' - S' + season + 'E' + ep + '.' + fix_ext(ext)
                 logger.info(f'{new_name}')
                 if move_up_to_season_folder:
                     new_path = get_season_path(file_path) + '/' + new_name
@@ -621,11 +625,11 @@ else:
     file_name, ext = get_file_name_ext(target_path)
     parent_folder_path = os.path.dirname(file_path)
     if ext.lower() in COMPOUND_EXTS:
-        season, ep = get_season_and_ep(file_path)
+        tv_name, season, ep = get_season_and_ep(file_path)
         if season and ep:
             # 修正集数
             ep = ep_offset_patch(file_path, ep)
-            new_name = 'S' + season + 'E' + ep + '.' + fix_ext(ext)
+            new_name = tv_name + ' - S' + season + 'E' + ep + '.' + fix_ext(ext)
             logger.info(f'{new_name}')
             if move_up_to_season_folder:
                 new_path = format_path(get_season_path(file_path) + '\\' + new_name)
